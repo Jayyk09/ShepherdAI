@@ -1,13 +1,16 @@
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter, SentenceTransformersTokenTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import OpenAI
-from langchain.chains import RetrievalQA
+from langchain_huggingface import HuggingFaceEmbeddings 
 from PyPDF2 import PdfReader
+import openai
+from langchain.schema import Document
+
 import os
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+load_dotenv()
+openai_key = os.getenv("OPENAI_API_.KEY")
+openai.api_key = openai_key
 
 def extract_text_from_pdfs(pdf_paths):
     """
@@ -34,7 +37,7 @@ def preprocess_data(file_paths, chunk_size=500, chunk_overlap=50, tokens_per_chu
         chunk_size (int): Maximum size of each chunk.
         chunk_overlap (int): Overlap between chunks.
     Returns:
-        list: List of text chunks.
+        list: List of Document objects.
     """
     pdf_texts = extract_text_from_pdfs(file_paths)
     # Stage 1: Character-level splitting
@@ -49,10 +52,11 @@ def preprocess_data(file_paths, chunk_size=500, chunk_overlap=50, tokens_per_chu
     )
     token_split_texts = []
     for text in character_split_texts:
-        token_split_texts += token_splitter.split_text(text) 
+        token_split_texts += token_splitter.split_text(text)
 
-    return token_split_texts
-
+    # Convert chunks to Document objects
+    documents = [Document(page_content=text) for text in token_split_texts]
+    return documents
 
 # Initialize FAISS with embeddings
 def create_faiss_index(chunks, embedding_model="sentence-transformers/paraphrase-MiniLM-L6-v2"):
@@ -68,7 +72,9 @@ def create_faiss_index(chunks, embedding_model="sentence-transformers/paraphrase
     vectorstore = FAISS.from_documents(chunks, embeddings)
     return vectorstore
 
-def augment_query_generated(query, model="gpt-3.5-turbo", client=client):
+# Either use the augmented query or the multiple queries
+
+def augment_query_generated(query, model="gpt-3.5-turbo"):
     """
     Generates an example answer to the given query in the context of the Bible.
     Args:
@@ -92,14 +98,14 @@ def augment_query_generated(query, model="gpt-3.5-turbo", client=client):
         {"role": "user", "content": query},
     ]
 
-    response = client.chat.completions.create(
+    response = openai.chat.completions.create(
         model=model,
         messages=messages,
     )
     content = response.choices[0].message.content
     return content
 
-def generate_multiple_queries(query, num_queries=5, model="gpt-3.5-turbo", client=client):
+def generate_multiple_queries(query, num_queries=5, model="gpt-3.5-turbo", ):
     """
     Generates multiple related questions based on a Bible-related query.
     Args:
@@ -126,10 +132,66 @@ def generate_multiple_queries(query, num_queries=5, model="gpt-3.5-turbo", clien
         {"role": "user", "content": query},
     ]
 
-    response = client.chat.completions.create(
+    response = openai.chat.completions.create(
         model=model,
         messages=messages,
     )
     content = response.choices[0].message.content
     content = [q.strip() for q in content.split("\n") if q.strip()]
     return content
+
+def generate_final_answer( original_query, augmented_queries, retriever, client, model="gpt-3.5-turbo", n_results=5
+):
+    """
+    Generates a final, consolidated answer based on the original query, augmented queries, and retrieved documents.
+    Args:
+        original_query (str): The main user question.
+        augmented_queries (list): List of related questions generated from the original query.
+        retriever: FAISS retriever for document retrieval.
+        client: OpenAI client for API interactions.
+        model (str): The language model to use (default: "gpt-3.5-turbo").
+        n_results (int): Number of results to retrieve for each query.
+    Returns:
+        str: The final consolidated answer.
+    """
+    all_contexts = []
+    augmented_answers = []
+
+    # Retrieve documents and generate augmented answers for each query
+    for query in [original_query] + augmented_queries:
+        # Retrieve documents
+        retrieved_docs = retriever.similarity_search(query, k=n_results)
+        context = "\n".join([doc.page_content for doc in retrieved_docs])
+        all_contexts.append(context)
+
+        # Generate an answer for each query
+        augmented_answer = augment_query_generated(query, context=context)
+        augmented_answers.append(augmented_answer)
+
+    # Combine all contexts and augmented answers
+    combined_context = "\n".join(all_contexts)
+    combined_answers = "\n".join(augmented_answers)
+
+    # Generate the final consolidated answer
+    final_prompt = f"""
+    You are a knowledgeable and compassionate biblical counselor. 
+    Below is the context from relevant documents and the answers to related questions:
+    
+    Context:
+    {combined_context}
+
+    Related Answers:
+    {combined_answers}
+    
+    Based on this information, provide a detailed and thoughtful final answer to the main query:
+    {original_query}
+    """
+    response = openai.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": final_prompt},
+            {"role": "user", "content": original_query},
+        ],
+    )
+    final_answer = response.choices[0].message.content
+    return final_answer
