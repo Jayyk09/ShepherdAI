@@ -1,0 +1,71 @@
+# Bible and Commentary Question Answering System
+
+This project demonstrates how to build a question answering system over the Bible and its commentaries using LangChain. It leverages the power of Large Language Models (LLMs) and efficient vector search to provide insightful answers to your questions.
+
+## Overview
+
+The system works by:
+
+1. **Preprocessing the data:** Loading the Bible and commentary texts and splitting them into manageable chunks.
+2. **Creating a vector index:** Embedding the text chunks and storing them in a FAISS index for efficient similarity search.
+3. **Utilizing an LLM:** Employing a powerful LLM (like OpenAI's text-davinci-003) to generate answers based on the retrieved relevant chunks.
+
+## Prerequisites
+
+- Python 3.x
+- OpenAI API key
+
+## Installation Steps
+
+1. Install required packages:
+   ```
+   pip install requirements.txt
+   ```
+
+2. Set up OpenAI API key:
+   ```
+   export OPENAI_API_KEY='your-api-key-here'
+   ```
+
+## Main Components
+
+- Text preprocessing with configurable chunk sizes (default: 500 chars)
+- FAISS vector database for efficient similarity search
+- OpenAI's text-davinci-003 model for answer generation
+- HuggingFace's sentence transformers for embeddings
+
+## Configuration Options
+
+- Chunk size: 500 characters
+- Chunk overlap: 50 characters
+- Embedding model: "sentence-transformers/paraphrase-MiniLM-L6-v2"
+- Temperature: 0.7
+- Max tokens: 300
+
+## Usage Example
+
+```python
+from model import preprocess_data, create_faiss_index
+
+# Process documents
+chunks = preprocess_data("bible_and_commentary.txt")
+
+# Create and save index
+retriever = create_faiss_index(chunks)
+retriever.save_local("faiss_index")
+
+# Ask questions
+query = "What does the Bible say about love?"
+result = qa_chain.run(query)
+```
+
+## Next Steps
+
+1. [ ] Implement data preprocessing pipeline
+2. [ ] Set up FAISS indexing
+3. [ ] Create QA chain with LangChain
+4. [ ] Add error handling and logging
+5. [ ] Create simple API interface
+6. [ ] Add documentation
+7. [ ] Test with various Bible translations
+8. [ ] Optimize performance
