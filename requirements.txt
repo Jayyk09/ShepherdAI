@@ -1,1 +1,4 @@
 retell-sdk
+git+https://github.com/openai/swarm.git
+langchain_community
+PyPDF2
