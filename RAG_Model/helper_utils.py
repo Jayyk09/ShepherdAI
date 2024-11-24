@@ -3,14 +3,31 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter, SentenceTra
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings 
 from PyPDF2 import PdfReader
-import openai
 from langchain.schema import Document
-
 import os
+import google.generativeai as genai
 
-load_dotenv()
-openai_key = os.getenv("OPENAI_API_.KEY")
-openai.api_key = openai_key
+google_api_key = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=google_api_key)
+
+def load_or_create_faiss_index(pdf_paths, retriever_path, embedding_model="sentence-transformers/paraphrase-MiniLM-L6-v2"):
+    """
+    Load FAISS index if it exists; otherwise, create and save it.
+    Args:
+        pdf_paths (list of str): Paths to PDF files to process.
+        retriever_path (str): Path to save/retrieve the FAISS index.
+    Returns:
+        FAISS: The loaded or newly created FAISS index.
+    """
+    embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+    if os.path.exists(retriever_path):
+        retriever = FAISS.load_local(retriever_path, embeddings, allow_dangerous_deserialization=True)
+    else:
+        chunks = preprocess_data(pdf_paths)
+        retriever = create_faiss_index(chunks, embedding_model)
+        retriever.save_local(retriever_path)
+    return retriever
+
 
 def extract_text_from_pdfs(pdf_paths):
     """
@@ -74,38 +91,7 @@ def create_faiss_index(chunks, embedding_model="sentence-transformers/paraphrase
 
 # Either use the augmented query or the multiple queries
 
-def augment_query_generated(query, model="gpt-3.5-turbo"):
-    """
-    Generates an example answer to the given query in the context of the Bible.
-    Args:
-        query (str): The user's question or query.
-        model (str): The language model to use (default: "gpt-3.5-turbo").
-    Returns:
-        str: A generated example answer to the query.
-    """
-    prompt = """
-    You are a knowledgeable and compassionate biblical counselor. 
-    Your role is to provide example answers to questions based on the Bible, incorporating scripture references and commentary insights. 
-    Use language that is clear, respectful, and faithful to biblical teachings.
-    Provide an example response to the following query as if it might be found in a discussion of scripture or a theological commentary.
-    """
-    
-    messages = [
-        {
-            "role": "system",
-            "content": prompt,
-        },
-        {"role": "user", "content": query},
-    ]
-
-    response = openai.chat.completions.create(
-        model=model,
-        messages=messages,
-    )
-    content = response.choices[0].message.content
-    return content
-
-def generate_multiple_queries(query, num_queries=5, model="gpt-3.5-turbo", ):
+def generate_multiple_queries(query, num_queries=5, model=None):
     """
     Generates multiple related questions based on a Bible-related query.
     Args:
@@ -116,37 +102,29 @@ def generate_multiple_queries(query, num_queries=5, model="gpt-3.5-turbo", ):
     Returns:
         list: List of related questions generated from the query.
     """
+    if model is None:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
     prompt = f"""
     You are a knowledgeable and compassionate biblical counselor. 
-    Your users are asking questions about the Bible and Christian living. 
-    For the given query, propose up to {num_queries} related questions to help them explore the topic further. 
-    Use clear, concise language and ensure each question focuses on a single aspect of the topic. 
-    Questions should be directly related to scripture, theology, or practical Christian living. 
+    For the given query "{query}", propose up to {num_queries} related questions to help them explore the topic further. 
     List each question on a separate line without numbering.
     """
-    messages = [
-        {
-            "role": "system",
-            "content": prompt,
-        },
-        {"role": "user", "content": query},
-    ]
 
-    response = openai.chat.completions.create(
-        model=model,
-        messages=messages,
+    response = model.generate_content(
+        prompt
     )
-    content = response.choices[0].message.content
+
+    content = response.text
     content = [q.strip() for q in content.split("\n") if q.strip()]
     return content
+    
 
-def generate_final_answer( original_query, augmented_queries, retriever, client, model="gpt-3.5-turbo", n_results=5
-):
+def generate_final_answer( original_query, retriever, model=None):
     """
     Generates a final, consolidated answer based on the original query, augmented queries, and retrieved documents.
     Args:
         original_query (str): The main user question.
-        augmented_queries (list): List of related questions generated from the original query.
         retriever: FAISS retriever for document retrieval.
         client: OpenAI client for API interactions.
         model (str): The language model to use (default: "gpt-3.5-turbo").
@@ -154,44 +132,19 @@ def generate_final_answer( original_query, augmented_queries, retriever, client,
     Returns:
         str: The final consolidated answer.
     """
-    all_contexts = []
-    augmented_answers = []
+    if model is None:
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
-    # Retrieve documents and generate augmented answers for each query
-    for query in [original_query] + augmented_queries:
-        # Retrieve documents
-        retrieved_docs = retriever.similarity_search(query, k=n_results)
-        context = "\n".join([doc.page_content for doc in retrieved_docs])
-        all_contexts.append(context)
+    augmented_queries = generate_multiple_queries(original_query)
+    joined_queries = original_query + " " + " ".join(augmented_queries)
+    # get context from retriever
+    context = retriever.similarity_search(joined_queries, k=5)
+    # Prepare context for the model
+    context_text = "\n\n".join([doc.page_content for doc in context])
 
-        # Generate an answer for each query
-        augmented_answer = augment_query_generated(query, context=context)
-        augmented_answers.append(augmented_answer)
 
-    # Combine all contexts and augmented answers
-    combined_context = "\n".join(all_contexts)
-    combined_answers = "\n".join(augmented_answers)
-
-    # Generate the final consolidated answer
-    final_prompt = f"""
-    You are a knowledgeable and compassionate biblical counselor. 
-    Below is the context from relevant documents and the answers to related questions:
-    
-    Context:
-    {combined_context}
-
-    Related Answers:
-    {combined_answers}
-    
-    Based on this information, provide a detailed and thoughtful final answer to the main query:
-    {original_query}
-    """
-    response = openai.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": final_prompt},
-            {"role": "user", "content": original_query},
-        ],
+    # Generate answer using OpenAI's ChatCompletion
+    response = model.generate_content(
+        original_query + "\n\n" + context_text  + "write a concise answer in 200 words or less as a biblical counselor on a phone using the context provided"
     )
-    final_answer = response.choices[0].message.content
-    return final_answer
+    return response._result.candidates[0].content.parts[0].text
