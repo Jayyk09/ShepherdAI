@@ -1,4 +1,4 @@
-from helper_utils import preprocess_data, create_faiss_index, generate_final_answer, load_or_create_faiss_index
+from helper_utils import generate_final_answer, load_or_create_faiss_index
 import google.generativeai as genai
 import os
 

@@ -28,6 +28,8 @@ def load_or_create_faiss_index(pdf_paths, retriever_path, embedding_model="sente
         retriever.save_local(retriever_path)
     return retriever
 
+def load_model(model="gemini-1.5-flash"):
+    return genai.GenerativeModel(model)
 
 def extract_text_from_pdfs(pdf_paths):
     """
