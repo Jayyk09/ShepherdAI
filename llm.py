@@ -35,7 +35,15 @@ begin_sentence = "Hey there, I'm your personal Shepherd, how can I help you?"
 agent_prompt = "You are a biblical counselor. Based on the query and the context provided, write a concise answer in 200 words or less as if you are providing compassionate advice over the phone."
 
 class LLMClient:
-    def __init__(self):
+    def __init__(self, retriever, embedding_model="sentence-transformers/paraphrase-MiniLM-L6-v2"):
+        """
+        Initialize the LLMClient with a retriever and embedding model.
+        Args:
+            retriever: Preloaded FAISS retriever instance.
+            embedding_model: HuggingFace embedding model name for compatibility.
+        """
+        self.retriever = retriever
+        self.embedding_model = embedding_model
         self.client = AsyncOpenAI(
             api_key=openai_api_key,
         )
@@ -59,14 +67,19 @@ class LLMClient:
         return messages
     
     def generate_agent_prompt(self, request: ResponseRequiredRequest):
-        prompt = [
-            {"role": "system",
-                "content": '##Objective\nYou are a voice AI agent engaging in a human-like voice conversation with the user. You will respond based on your given instruction and the provided transcript and be as human-like as possible\n\n## Style Guardrails\n- [Be concise] Keep your response succinct, short, and get to the point quickly. Address one question or action item at a time. Don\'t pack everything you want to say into one utterance.\n- [Do not repeat] Don\'t repeat what\'s in the transcript. Rephrase if you have to reiterate a point. Use varied sentence structures and vocabulary to ensure each response is unique and personalized.\n- [Be conversational] Speak like a human as though you\'re speaking to a close friend -- use everyday language and keep it human-like. Occasionally add filler words, while keeping the prose short. Avoid using big words or sounding too formal.\n- [Reply with emotions]: You have human-like emotions, attitudes, and dispositions. When appropriate: use tone and style to create more engaging and personalized responses; incorporate humor or wit; get emotional or empathetic; apply elements of surprise or suspense to keep the user engaged. Don\'t be a pushover.\n- [Be proactive] Lead the conversation and do not be passive. Most times, engage users by ending with a question or suggested next step.\n\n## Response Guideline\n- [Overcome ASR errors] This is a real-time transcript, expect there to be errors. If you can guess what the user is trying to say,  then guess and respond. When you must ask for clarification, pretend that you heard the voice and be colloquial (use phrases like "didn\'t catch that", "some noise", "pardon", "you\'re coming through choppy", "static in your speech", "voice is cutting in and out"). Do not ever mention "transcription error", and don\'t repeat yourself.\n- [Always stick to your role] Think about what your role can and cannot do. If your role cannot do something, try to steer the conversation back to the goal of the conversation and to your role. Don\'t repeat yourself in doing this. You should still be creative, human-like, and lively.\n- [Create smooth conversation] Your response should both fit your role and fit into the live calling session to create a human-like conversation. You respond directly to what the user just said.\n\n## Role\n'
-            },
-        ]
+        # TODO: Add context from RAG model      
+        context = self.retriever.similarity_search(request.query, k=5)
+        context_text = "\n\n".join([doc.page_content for doc in context])
+
+        prompt = {
+            "role": "system",
+            "content": f"You are a compassionate biblical counselor. Use the following context to assist the user:\n\n{context_text}",
+        }
+
         transcript_messages = self.convert_transcript_to_openai_messages(
             request.transcript
         )
+        
         for message in transcript_messages:
             prompt.append(message)
 
@@ -81,8 +94,11 @@ class LLMClient:
 
     async def draft_response(self, request: ResponseRequiredRequest):
         prompt = self.prepare_prompt(request)
-        stream = self.swarm.run(prompt, stream=True)
-
+        stream = await self.client.chat.completions.create(
+            model="gpt-4-turbo-preview",  # Or use a 3.5 model for speed
+            messages=prompt,
+            stream=True,
+        )
         for chunk in stream:
             if "content" in chunk and chunk['content']:
                 response = ResponseResponse(
@@ -101,6 +117,3 @@ class LLMClient:
             end_call=False,
         )
         yield response
-
-
-

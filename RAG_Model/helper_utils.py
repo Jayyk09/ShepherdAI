@@ -89,7 +89,7 @@ def create_faiss_index(chunks, embedding_model="sentence-transformers/paraphrase
 
 # Either use the augmented query or the multiple queries
 
-def generate_multiple_queries(query, num_queries=5, model=None):
+def generate_multiple_queries(query, num_queries=5, client=None):
     """
     Generates multiple related questions based on a Bible-related query.
     Args:
