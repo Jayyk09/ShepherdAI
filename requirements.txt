@@ -3,3 +3,7 @@ git+https://github.com/openai/swarm.git
 langchain_community
 PyPDF2
 langchain
+langchain_huggingface
+faiss-cpu
+openai
+sentence-transformers
