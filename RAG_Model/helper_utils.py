@@ -5,10 +5,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from PyPDF2 import PdfReader
 from langchain.schema import Document
 import os
-import google.generativeai as genai
+from openai import OpenAI
 
-google_api_key = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=google_api_key)
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 def load_or_create_faiss_index(pdf_paths, retriever_path, embedding_model="sentence-transformers/paraphrase-MiniLM-L6-v2"):
     """
@@ -27,9 +26,6 @@ def load_or_create_faiss_index(pdf_paths, retriever_path, embedding_model="sente
         retriever = create_faiss_index(chunks, embedding_model)
         retriever.save_local(retriever_path)
     return retriever
-
-def load_model(model="gemini-1.5-flash"):
-    return genai.GenerativeModel(model)
 
 def extract_text_from_pdfs(pdf_paths):
     """
@@ -104,20 +100,21 @@ def generate_multiple_queries(query, num_queries=5, model=None):
     Returns:
         list: List of related questions generated from the query.
     """
-    if model is None:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-
     prompt = f"""
     You are a knowledgeable and compassionate biblical counselor. 
     For the given query "{query}", propose up to {num_queries} related questions to help them explore the topic further. 
     List each question on a separate line without numbering.
     """
 
-    response = model.generate_content(
-        prompt
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
     )
 
-    content = response.text
+    content = response.choices[0].message.content
     content = [q.strip() for q in content.split("\n") if q.strip()]
     return content
     
@@ -135,7 +132,7 @@ def generate_final_answer( original_query, retriever, model=None):
         str: The final consolidated answer.
     """
     if model is None:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        client = OpenAI()
 
     augmented_queries = generate_multiple_queries(original_query)
     joined_queries = original_query + " " + " ".join(augmented_queries)
@@ -144,9 +141,20 @@ def generate_final_answer( original_query, retriever, model=None):
     # Prepare context for the model
     context_text = "\n\n".join([doc.page_content for doc in context])
 
+    prompt = f"""
+        Based on the query "{original_query}" and the following context:
+
+        {context_text}
+
+        Write a concise answer in 200 words or less as if you are providing compassionate advice over the phone.
+        """
 
     # Generate answer using OpenAI's ChatCompletion
-    response = model.generate_content(
-        original_query + "\n\n" + context_text  + "write a concise answer in 200 words or less as a biblical counselor on a phone using the context provided"
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful and compassionate biblical counselor."},
+            {"role": "user", "content": prompt}
+        ]
     )
-    return response._result.candidates[0].content.parts[0].text
+    return response.choices[0].message.content
