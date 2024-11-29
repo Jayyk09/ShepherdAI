@@ -11,26 +11,6 @@ from typing import List
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI()
 
-
-pdf_paths = ["data/Matthew_Henrys_Concise_Commentary_On_The_Bible.pdf", "data/The-Bible,-New-Revised-Standard-Version.pdf"]
-
-retriever_path = "retriever.json"
-
-retriever = load_or_create_faiss_index(pdf_paths, retriever_path)
-
-# save to local
-retriever.save_local("retriever.json")
-# Example Usage
-original_query = "I feel like I am failing in life and not doing well in school. What should I do?"
-# Generate final answer
-final_answer = generate_final_answer(
-    original_query=original_query,
-    retriever=retriever,
-    model=client,
-)
-
-print(f"Final Answer:\n{final_answer}")
-
 begin_sentence = "Hey there, I'm your personal Shepherd, how can I help you?"
 agent_prompt = "You are a biblical counselor. Based on the query and the context provided, write a concise answer in 200 words or less as if you are providing compassionate advice over the phone."
 
@@ -79,7 +59,7 @@ class LLMClient:
         transcript_messages = self.convert_transcript_to_openai_messages(
             request.transcript
         )
-        
+
         for message in transcript_messages:
             prompt.append(message)
 

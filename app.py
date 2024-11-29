@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 from dotenv import load_dotenv
+from RAG_Model.helper_utils import load_or_create_faiss_index
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from concurrent.futures import TimeoutError as ConnectionTimeoutError
@@ -13,8 +14,31 @@ from .custom_types import (
 from .llm import LLMClient
 
 load_dotenv(override=True)
-app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
+
+retriever = None  # Global retriever instance
+
+# use lifespan to initialize retriever
+async def app_lifespan(app):
+    global retriever
+    pdf_paths = ["data/Matthew_Henrys_Concise_Commentary_On_The_Bible.pdf", "data/The-Bible,-New-Revised-Standard-Version.pdf"]
+    retriever_path = "retriever.json"
+
+    # Startup logic
+    print("Initializing retriever during lifespan startup...")
+    if not os.path.exists(retriever_path):
+        print("Retriever file not found. Initializing a new FAISS index...")
+        retriever = load_or_create_faiss_index(pdf_paths, retriever_path)
+        retriever.save_local(retriever_path)
+        print("Retriever initialized and saved locally.")
+    else:
+        print("Retriever file found. Loading existing FAISS index...")
+        retriever = load_or_create_faiss_index([], retriever_path)
+        print("Retriever loaded successfully.")
+
+    yield  # Lifespan enters the main application runtime here
+
+app = FastAPI(lifespan=app_lifespan)
 
 # Handle webhook from Retell server. This is used to receive events from Retell server.
 # Including call_started, call_ended, call_analyzed
