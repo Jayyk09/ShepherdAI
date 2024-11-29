@@ -7,3 +7,6 @@ langchain_huggingface
 faiss-cpu
 openai
 sentence-transformers
+uvicorn
+fastapi
+dotenv

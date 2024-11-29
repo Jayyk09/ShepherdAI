@@ -1,15 +1,12 @@
 from RAG_Model.helper_utils import generate_final_answer, load_or_create_faiss_index
 import os
 from openai import OpenAI, AsyncOpenAI
-from .custom_types import (
+from custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
 )
 from typing import List
-
-openai_api_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI()
 
 begin_sentence = "Hey there, I'm your personal Shepherd, how can I help you?"
 agent_prompt = "You are a biblical counselor. Based on the query and the context provided, write a concise answer in 200 words or less as if you are providing compassionate advice over the phone."
