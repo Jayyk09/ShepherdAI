@@ -84,6 +84,11 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
         await websocket.accept()
         llm_client = None
 
+        if retriever is None:
+            raise Exception("Retriever not initialized")
+
+        llm_client = LLMClient(retriever)
+
         # Send optional config to Retell server
         config = ConfigResponse(
             response_type="config",

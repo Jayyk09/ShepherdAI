@@ -1,12 +1,14 @@
 from RAG_Model.helper_utils import generate_final_answer, load_or_create_faiss_index
 import os
-from openai import OpenAI, AsyncOpenAI
+from openai import AsyncOpenAI
 from custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
 )
 from typing import List
+
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 begin_sentence = "Hey there, I'm your personal Shepherd, how can I help you?"
 agent_prompt = "You are a biblical counselor. Based on the query and the context provided, write a concise answer in 200 words or less as if you are providing compassionate advice over the phone."
@@ -44,14 +46,17 @@ class LLMClient:
         return messages
     
     def generate_agent_prompt(self, request: ResponseRequiredRequest):
-        # TODO: Add context from RAG model      
-        context = self.retriever.similarity_search(request.query, k=5)
+        # TODO: Add context from RAG model
+        query = request.transcript[-1].content if request.transcript else ""
+        context = self.retriever.similarity_search(query, k=5)
         context_text = "\n\n".join([doc.page_content for doc in context])
 
-        prompt = {
-            "role": "system",
-            "content": f"You are a compassionate biblical counselor. Use the following context to assist the user:\n\n{context_text}",
-        }
+        prompt = [
+            {
+                "role": "system",
+                "content": f"You are a compassionate biblical counselor. Use the following context to assist the user:\n\n{context_text}",
+            }
+        ]
 
         transcript_messages = self.convert_transcript_to_openai_messages(
             request.transcript
@@ -70,21 +75,31 @@ class LLMClient:
         return prompt
 
     async def draft_response(self, request: ResponseRequiredRequest):
-        prompt = self.prepare_prompt(request)
+        prompt = self.generate_agent_prompt(request)
         stream = await self.client.chat.completions.create(
             model="gpt-4-turbo-preview",  # Or use a 3.5 model for speed
             messages=prompt,
             stream=True,
         )
-        for chunk in stream:
-            if "content" in chunk and chunk['content']:
+        print(f"Prompt being sent to OpenAI for request ID {request.response_id}: {prompt}")
+
+        accumulated_content = ""
+
+        async for chunk in stream:
+        # Ensure "choices" and "delta" keys are present in the chunk
+            if chunk.choices and chunk.choices[0].delta.content:
+                new_content = chunk.choices[0].delta.content
+                accumulated_content += new_content
+                # Build and yield the response
                 response = ResponseResponse(
                     response_id=request.response_id,
-                    content=chunk['content'],
+                    content=new_content,
                     content_complete=False,
                     end_call=False,
                 )
+                print(f"Response chunk sent: {response}")
                 yield response
+
 
         # Send final response with "content_complete" set to True to signal completion
         response = ResponseResponse(
